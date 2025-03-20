@@ -152,7 +152,7 @@ net.core.wmem_default=26214400
     fi
 }
 
-launch_four_more_nodes() {
+many_node() {
     # Остановка существующих контейнеров
     docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | wc -l) | while read container_id; do
         docker stop "$container_id"
@@ -168,7 +168,7 @@ launch_four_more_nodes() {
 
     storage_gb=50
     start_port=1235
-    container_count=4  # Запускаем 4 дополнительные ноды
+    container_count=5  # Устанавливаем 5 нод
 
     public_ips=$(curl -s https://api.ipify.org)
 
@@ -182,7 +182,7 @@ launch_four_more_nodes() {
 
     current_port=$start_port
     for ip in $public_ips; do
-        echo -e "${BLUE}Запускаем дополнительные ноды на IP $ip...${NC}"
+        echo -e "${BLUE}Устанавливаем ноды на IP $ip...${NC}"
   
         for ((i=1; i<=container_count; i++)); do
             storage_path="$HOME/titan_storage_${ip}_${i}"
@@ -205,12 +205,12 @@ launch_four_more_nodes() {
 
             docker exec $container_id bash -c "\
                 titan-edge bind --hash=$id https://api-test1.container1.titannet.io/api/v2/device/binding"
-            echo -e "${GREEN}Нода titan_${ip}_${i} успешно запущена.${NC}"
+            echo -e "${GREEN}Нода titan_${ip}_${i} успешно установлена.${NC}"
   
             current_port=$((current_port + 1))
         done
     done
-    echo -e "${GREEN}Все дополнительные ноды успешно запущены!${NC}"
+    echo -e "${GREEN}Все 5 нод успешно установлены!${NC}"
 }
 
 docker_logs() {
@@ -265,7 +265,7 @@ main_menu() {
         echo -e "\n\n${YELLOW}Выберите действие:${NC}"
         echo -e "${CYAN}1. Установить и запустить ноду${NC}"
         echo -e "${CYAN}2. Проверить логи${NC}"
-        echo -e "${CYAN}3. Запустить ещё 4 ноды${NC}"
+        echo -e "${CYAN}3. Установить 5 нод${NC}"
         echo -e "${CYAN}4. Перезапустить ноду${NC}"
         echo -e "${CYAN}5. Остановить ноду${NC}"
         echo -e "${CYAN}6. Удалить ноду${NC}"
@@ -276,7 +276,7 @@ main_menu() {
         case $choice in
             1) download_node ;;
             2) docker_logs ;;
-            3) launch_four_more_nodes ;;
+            3) many_node ;;
             4) restart_node ;;
             5) stop_node ;;
             6) delete_node ;;
