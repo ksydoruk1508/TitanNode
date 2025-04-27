@@ -46,6 +46,17 @@ EOF
 echo -e "${NC}"
 }
 
+#!/bin/bash
+
+# Цвета для вывода
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# Функция для установки одной ноды
 download_node() {
     echo -e "${BLUE}Начинается установка ноды...${NC}"
 
@@ -98,9 +109,8 @@ download_node() {
 
     echo -e "${GREEN}Необходимые зависимости были установлены. Запускаем ноду...${NC}"
 
-    # Логика из launch_node
     # Остановка и удаление существующих контейнеров (если есть)
-    docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | wc -l) | while read container_id; do
+    docker ps -a --filter "ancestor=nezha123/titan-edge:1.5" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge:1.5" --format "{{.ID}}" | wc -l) | while read container_id; do
         docker stop "$container_id"
         docker rm "$container_id"
     done
@@ -116,14 +126,15 @@ download_node() {
     done
 
     # Запуск контейнера и привязка
-    docker run --network=host -d -v ~/.titanedge:$HOME/.titanedge nezha123/titan-edge
+    docker run --network=host -d -v ~/.titanedge:$HOME/.titanedge nezha123/titan-edge:1.5
     sleep 10
 
-    docker run --rm -it -v ~/.titanedge:$HOME/.titanedge nezha123/titan-edge bind --hash=$HASH https://api-test1.container1.titannet.io/api/v2/device/binding
+    docker run --rm -it -v ~/.titanedge:$HOME/.titanedge nezha123/titan-edge:1.5 bind --hash=$HASH https://api-test1.container1.titannet.io/api/v2/device/binding
 
     echo -e "${GREEN}Нода успешно установлена и запущена!${NC}"
 }
 
+# Функция для обновления sysctl
 update_sysctl_config() {
     local CONFIG_VALUES="
 net.core.rmem_max=26214400
@@ -152,9 +163,10 @@ net.core.wmem_default=26214400
     fi
 }
 
+# Функция для установки 5 нод
 many_node() {
     # Остановка существующих контейнеров
-    docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | wc -l) | while read container_id; do
+    docker ps -a --filter "ancestor=nezha123/titan-edge:1.5" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge:1.5" --format "{{.ID}}" | wc -l) | while read container_id; do
         docker stop "$container_id"
         docker rm "$container_id"
     done
@@ -178,7 +190,12 @@ many_node() {
     fi
 
     # Пул образа
-    docker pull nezha123/titan-edge
+    echo -e "${BLUE}Загружаем образ nezha123/titan-edge:1.5...${NC}"
+    docker pull nezha123/titan-edge:1.5
+
+    # Проверка архитектуры образа
+    echo -e "${BLUE}Проверяем архитектуру образа...${NC}"
+    docker inspect nezha123/titan-edge:1.5 | grep Architecture
 
     current_port=$start_port
     for ip in $public_ips; do
@@ -190,7 +207,7 @@ many_node() {
             sudo mkdir -p "$storage_path"
             sudo chmod -R 777 "$storage_path"
   
-            container_id=$(docker run --platform linux/amd64 -d --restart always -v "$storage_path:$HOME/.titanedge/storage" --name "titan_${ip}_${i}" --net=host nezha123/titan-edge)
+            container_id=$(docker run -d --restart always -v "$storage_path:$HOME/.titanedge/storage" --name "titan_${ip}_${i}" --net=host nezha123/titan-edge:1.5)
   
             echo -e "${GREEN}Нода titan_${ip}_${i} запущена с ID контейнера $container_id${NC}"
   
@@ -213,36 +230,41 @@ many_node() {
     echo -e "${GREEN}Все 5 нод успешно установлены!${NC}"
 }
 
+# Функция для проверки логов
 docker_logs() {
     echo -e "${BLUE}Проверяем логи ноды...${NC}"
-    docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | wc -l) | while read container_id; do
+    docker ps -a --filter "ancestor=nezha123/titan-edge:1.5" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge:1.5" --format "{{.ID}}" | wc -l) | while read container_id; do
+        echo -e "${BLUE}Логи контейнера $container_id:${NC}"
         docker logs "$container_id"
     done
     echo -e "${BLUE}Логи выведены. Возвращаемся в меню...${NC}"
 }
 
+# Функция для перезапуска ноды
 restart_node() {
     echo -e "${BLUE}Перезапускаем ноду...${NC}"
-    docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | wc -l) | while read container_id; do
+    docker ps -a --filter "ancestor=nezha123/titan-edge:1.5" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge:1.5" --format "{{.ID}}" | wc -l) | while read container_id; do
         docker restart "$container_id"
     done
     echo -e "${GREEN}Нода успешно перезапущена!${NC}"
 }
 
+# Функция для остановки ноды
 stop_node() {
     echo -e "${BLUE}Останавливаем ноду...${NC}"
-    docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | wc -l) | while read container_id; do
+    docker ps -a --filter "ancestor=nezha123/titan-edge:1.5" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge:1.5" --format "{{.ID}}" | wc -l) | while read container_id; do
         docker stop "$container_id"
     done
     echo -e "${GREEN}Нода остановлена!${NC}"
 }
 
+# Функция для удаления ноды
 delete_node() {
     echo -e "${YELLOW}Если уверены, что хотите удалить ноду, введите любую букву (CTRL+C чтобы выйти):${NC}"
     read -p "> " checkjust
 
     echo -e "${BLUE}Удаляем ноду...${NC}"
-    docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | wc -l) | while read container_id; do
+    docker ps -a --filter "ancestor=nezha123/titan-edge:1.5" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge:1.5" --format "{{.ID}}" | wc -l) | while read container_id; do
         docker stop "$container_id"
         docker rm "$container_id"
     done
@@ -253,11 +275,18 @@ delete_node() {
     echo -e "${GREEN}Нода успешно удалена!${NC}"
 }
 
+# Функция для выхода из скрипта
 exit_from_script() {
     echo -e "${BLUE}Выход из скрипта...${NC}"
     exit 0
 }
 
+# Функция заглушки для channel_logo
+channel_logo() {
+    echo -e "${CYAN}Запуск скрипта для управления нодой Titan...${NC}"
+}
+
+# Главное меню
 main_menu() {
     while true; do
         channel_logo
@@ -286,4 +315,5 @@ main_menu() {
     done
 }
 
+# Запуск главного меню
 main_menu
