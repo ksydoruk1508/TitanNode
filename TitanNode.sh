@@ -48,14 +48,39 @@ echo -e "${NC}"
 
 #!/bin/bash
 
-# Определение архитектуры
+# Определение архитектуры и настройка QEMU
 ARCH=$(uname -m)
 if [[ "$ARCH" == "x86_64" ]]; then
     DOCKER_PLATFORM_OPTION=""
 elif [[ "$ARCH" == "aarch64" ]]; then
     DOCKER_PLATFORM_OPTION="--platform linux/amd64"
+    echo -e "${YELLOW}Обнаружена ARM64-система. Настраиваем QEMU для эмуляции amd64...${NC}"
+    # Установка qemu-user и qemu-user-static
+    sudo apt update
+    sudo apt install -y qemu-user qemu-user-static
+    # Проверка наличия qemu-x86_64
+    if ! command -v qemu-x86_64 &> /dev/null; then
+        echo -e "${RED}Ошибка: qemu-x86_64 не найден после установки. Эмуляция невозможна. Выход...${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}qemu-x86_64 установлен: $(qemu-x86_64 --version)${NC}"
+    # Проверка binfmt_misc
+    if [ ! -d "/proc/sys/fs/binfmt_misc" ]; then
+        echo -e "${BLUE}Включаем binfmt_misc...${NC}"
+        sudo modprobe binfmt_misc
+        sudo systemctl enable --now systemd-binfmt
+    fi
+    # Ручная регистрация QEMU
+    echo -e "${BLUE}Регистрируем QEMU вручную...${NC}"
+    if ! sudo update-binfmts --install qemu-x86_64 /usr/bin/qemu-x86_64 --magic '\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x3e\x00' --mask '\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff'; then
+        echo -e "${RED}Ошибка: Не удалось зарегистрировать QEMU вручную. Эмуляция amd64 невозможна. Выход...${NC}"
+        exit 1
+    fi
+    # Перезапуск Docker
+    sudo systemctl restart docker
+    echo -e "${GREEN}QEMU настроен. Будет использоваться эмуляция amd64.${NC}"
 else
-    echo "Неизвестная архитектура: $ARCH"
+    echo -e "${RED}Неизвестная архитектура: $ARCH${NC}"
     exit 1
 fi
 
@@ -181,7 +206,12 @@ many_node() {
     fi
 
     # Пул образа
+    echo -e "${BLUE}Загружаем последнюю версию образа nezha123/titan-edge...${NC}"
     docker pull nezha123/titan-edge
+
+    # Проверка архитектуры образа
+    echo -e "${BLUE}Проверяем архитектуру образа...${NC}"
+    docker inspect nezha123/titan-edge | grep Architecture
 
     current_port=$start_port
     for ip in $public_ips; do
@@ -193,29 +223,46 @@ many_node() {
             sudo mkdir -p "$storage_path"
             sudo chmod -R 777 "$storage_path"
   
-            container_id=$(docker run -d --restart always -v "$storage_path:$HOME/.titanedge/storage" --name "titan_${ip}_${i}" --net=host nezha123/titan-edge)
-  
-            echo -e "${GREEN}Нода titan_${ip}_${i} запущена с ID контейнера $container_id${NC}"
-  
-            sleep 30
-  
-            docker exec $container_id bash -c "\
+            # Запуск временного контейнера для генерации ключа
+            echo -e "${BLUE}Запускаем временный контейнер для генерации ключа для ноды titan_${ip}_${i}...${NC}"
+            docker run $DOCKER_PLATFORM_OPTION -d -v "$storage_path:$HOME/.titanedge/storage" --name "titan_temp_${ip}_${i}" --net=host nezha123/titan-edge
+            sleep 30  # Даём время на генерацию ключа
+
+            # Проверка наличия ключа
+            if [ -f "$storage_path/identity/identity.key" ]; then
+                echo -e "${GREEN}Приватный ключ для ноды titan_${ip}_${i} успешно сгенерирован!${NC}"
+            else
+                echo -e "${RED}Ошибка: Приватный ключ для ноды titan_${ip}_${i} не был сгенерирован. Проверяйте логи контейнера titan_temp_${ip}_${i}.${NC}"
+                docker logs "titan_temp_${ip}_${i}"
+                docker stop "titan_temp_${ip}_${i}"
+                docker rm "titan_temp_${ip}_${i}"
+                exit 1
+            fi
+
+            # Настройка config.toml
+            docker exec "titan_temp_${ip}_${i}" bash -c "\
                 sed -i 's/^[[:space:]]*#StorageGB = .*/StorageGB = $storage_gb/' $HOME/.titanedge/config.toml && \
                 sed -i 's/^[[:space:]]*#ListenAddress = \"0.0.0.0:1234\"/ListenAddress = \"0.0.0.0:$current_port\"/' $HOME/.titanedge/config.toml && \
                 echo 'Хранилище titan_${ip}_${i} установлено на $storage_gb GB, порт установлен на $current_port'"
 
-            docker restart $container_id
+            # Привязка с использованием HASH
+            echo -e "${BLUE}Привязываем ноду titan_${ip}_${i} с использованием HASH...${NC}"
+            docker exec "titan_temp_${ip}_${i}" titan-edge bind --hash="$id" https://api-test1.container1.titannet.io/api/v2/device/binding
 
-            docker exec $container_id bash -c "\
-                titan-edge bind --hash=$id https://api-test1.container1.titannet.io/api/v2/device/binding"
-            echo -e "${GREEN}Нода titan_${ip}_${i} успешно установлена.${NC}"
+            # Остановка временного контейнера
+            docker stop "titan_temp_${ip}_${i}"
+            docker rm "titan_temp_${ip}_${i}"
+
+            # Запуск постоянного контейнера
+            container_id=$(docker run $DOCKER_PLATFORM_OPTION -d --restart always -v "$storage_path:$HOME/.titanedge/storage" --name "titan_${ip}_${i}" --net=host nezha123/titan-edge)
+  
+            echo -e "${GREEN}Нода titan_${ip}_${i} запущена с ID контейнера $container_id${NC}"
   
             current_port=$((current_port + 1))
         done
     done
     echo -e "${GREEN}Все 5 нод успешно установлены!${NC}"
 }
-
 
 docker_logs() {
     echo -e "${BLUE}Проверяем логи ноды...${NC}"
@@ -260,6 +307,10 @@ delete_node() {
 exit_from_script() {
     echo -e "${BLUE}Выход из скрипта...${NC}"
     exit 0
+}
+
+channel_logo() {
+    echo -e "${CYAN}Запуск скрипта для управления нодой Titan...${NC}"
 }
 
 main_menu() {
