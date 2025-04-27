@@ -188,6 +188,28 @@ net.core.wmem_default=26214400
     fi
 }
 
+# Функция ожидания готовности контейнера
+wait_for_container() {
+    local container_id=$1
+    local timeout=60
+    local elapsed=0
+    local interval=5
+
+    echo -e "${BLUE}Ожидаем, пока контейнер $container_id перейдёт в состояние running...${NC}"
+    while [ $elapsed -lt $timeout ]; do
+        if docker inspect --format='{{.State.Status}}' "$container_id" | grep -q "running"; then
+            echo -e "${GREEN}Контейнер $container_id готов!${NC}"
+            return 0
+        fi
+        sleep $interval
+        elapsed=$((elapsed + interval))
+    done
+
+    echo -e "${RED}Ошибка: Контейнер $container_id не перешёл в состояние running за $timeout секунд. Проверяйте логи контейнера.${NC}"
+    docker logs "$container_id"
+    exit 1
+}
+
 many_node() {
     # Остановка существующих контейнеров
     docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | wc -l) | while read container_id; do
@@ -208,6 +230,16 @@ many_node() {
     storage_gb=50
     start_port=1235
     container_count=5  # Устанавливаем 5 нод
+
+    # Проверка портов
+    echo -e "${BLUE}Проверяем доступность портов...${NC}"
+    for ((port=start_port; port<start_port+container_count; port++)); do
+        if [[ $(lsof -i :"$port" | wc -l) -gt 0 ]]; then
+            echo -e "${RED}Ошибка: Порт $port занят. Программа не сможет выполниться.${NC}"
+            exit 1
+        fi
+    done
+    echo -e "${GREEN}Все порты свободны!${NC}"
 
     public_ips=$(curl -s https://api.ipify.org)
 
@@ -234,22 +266,33 @@ many_node() {
             sudo mkdir -p "$storage_path"
             sudo chmod -R 777 "$storage_path"
   
+            # Создаём config.toml с правильным портом до запуска контейнера
+            echo -e "${BLUE}Создаём config.toml для ноды titan_${ip}_${i}...${NC}"
+            mkdir -p "$storage_path"
+            cat > "$storage_path/config.toml" <<EOF
+StorageGB = $storage_gb
+ListenAddress = "0.0.0.0:$current_port"
+EOF
+
             # Запуск контейнера
             container_id=$(docker run $DOCKER_PLATFORM_OPTION -d --restart always -v "$storage_path:$HOME/.titanedge/storage" --name "titan_${ip}_${i}" --net=host nezha123/titan-edge)
   
             echo -e "${GREEN}Нода titan_${ip}_${i} запущена с ID контейнера $container_id${NC}"
   
-            sleep 30
-  
-            # Настройка config.toml
-            docker exec $container_id bash -c "\
-                sed -i 's/^[[:space:]]*#StorageGB = .*/StorageGB = $storage_gb/' $HOME/.titanedge/config.toml && \
-                sed -i 's/^[[:space:]]*#ListenAddress = \"0.0.0.0:1234\"/ListenAddress = \"0.0.0.0:$current_port\"/' $HOME/.titanedge/config.toml && \
-                echo 'Хранилище titan_${ip}_${i} установлено на $storage_gb GB, порт установлен на $current_port'"
+            # Ожидаем готовности контейнера
+            wait_for_container "$container_id"
 
+            # Даём время на генерацию ключа
+            echo -e "${BLUE}Ожидаем генерацию ключа для ноды titan_${ip}_${i}...${NC}"
+            sleep 60
+  
             # Привязка с использованием HASH
             echo -e "${BLUE}Привязываем ноду titan_${ip}_${i} с использованием HASH...${NC}"
-            docker exec $container_id titan-edge bind --hash="$id" https://api-test1.container1.titannet.io/api/v2/device/binding
+            if ! docker exec $container_id titan-edge bind --hash="$id" https://api-test1.container1.titannet.io/api/v2/device/binding; then
+                echo -e "${RED}Ошибка при привязке ноды titan_${ip}_${i}. Проверяйте логи контейнера.${NC}"
+                docker logs "$container_id"
+                exit 1
+            fi
 
             echo -e "${GREEN}Нода titan_${ip}_${i} успешно установлена.${NC}"
   
