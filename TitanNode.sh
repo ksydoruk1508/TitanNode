@@ -46,8 +46,6 @@ EOF
 echo -e "${NC}"
 }
 
-#!/bin/bash
-
 # Определение архитектуры и настройка QEMU
 ARCH=$(uname -m)
 if [[ "$ARCH" == "x86_64" ]]; then
@@ -70,11 +68,16 @@ elif [[ "$ARCH" == "aarch64" ]]; then
         sudo modprobe binfmt_misc
         sudo systemctl enable --now systemd-binfmt
     fi
-    # Ручная регистрация QEMU
-    echo -e "${BLUE}Регистрируем QEMU вручную...${NC}"
-    if ! sudo update-binfmts --install qemu-x86_64 /usr/bin/qemu-x86_64 --magic '\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x3e\x00' --mask '\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff'; then
-        echo -e "${RED}Ошибка: Не удалось зарегистрировать QEMU вручную. Эмуляция amd64 невозможна. Выход...${NC}"
-        exit 1
+    # Проверка существующей регистрации QEMU
+    if [ -f "/proc/sys/fs/binfmt_misc/qemu-x86_64" ]; then
+        echo -e "${GREEN}QEMU уже зарегистрирован для эмуляции amd64.${NC}"
+    else
+        # Ручная регистрация QEMU
+        echo -e "${BLUE}Регистрируем QEMU вручную...${NC}"
+        if ! sudo update-binfmts --install qemu-x86_64 /usr/bin/qemu-x86_64 --magic '\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x3e\x00' --mask '\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff'; then
+            echo -e "${RED}Ошибка: Не удалось зарегистрировать QEMU вручную. Эмуляция amd64 невозможна. Выход...${NC}"
+            exit 1
+        fi
     fi
     # Перезапуск Docker
     sudo systemctl restart docker
