@@ -6,25 +6,15 @@ GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
-NC='\033[0m' # Нет цвета
+NC='\033[0m' # Нет цвета (сброс цвета)
 
-# Определение архитектуры и установка переменной образа
-ARCH=$(uname -m)
-if [[ "$ARCH" == "x86_64" ]]; then
-    DOCKER_IMAGE="nezha123/titan-edge"
-elif [[ "$ARCH" == "aarch64" ]]; then
-    DOCKER_IMAGE="nezha123/titan-edge:1.5"
-else
-    echo -e "${RED}Неподдерживаемая архитектура: $ARCH${NC}"
-    exit 1
-fi
-
-# Проверка наличия curl и установка, если нет
+# Проверка наличия curl и установка, если не установлен
 if ! command -v curl &> /dev/null; then
     sudo apt update
     sudo apt install curl -y
 fi
 
+# Логотип (можно заменить на твой)
 channel_logo() {
 echo -e "${GREEN}"
 cat << "EOF"
@@ -33,8 +23,25 @@ cat << "EOF"
    ██    ██    ██    ███████ ██ ██  ██     ██ ██  ██ ██    ██ ██   ██ █████   
    ██    ██    ██    ██   ██ ██  ██ ██     ██  ██ ██ ██    ██ ██   ██ ██      
    ██    ██    ██    ██   ██ ██   ████     ██   ████  ██████  ██████  ███████ 
+   
+________________________________________________________________________________________________________________________________________
 
-Donate: 0x0004230c13c3890F34Bb9C9683b91f539E809000
+
+███████  ██████  ██████      ██   ██ ███████ ███████ ██████      ██ ████████     ████████ ██████   █████  ██████  ██ ███    ██  ██████  
+██      ██    ██ ██   ██     ██  ██  ██      ██      ██   ██     ██    ██           ██    ██   ██ ██   ██ ██   ██ ██ ████   ██ ██       
+█████   ██    ██ ██████      █████   █████   █████   ██████      ██    ██           ██    ██████  ███████ ██   ██ ██ ██ ██  ██ ██   ███ 
+██      ██    ██ ██   ██     ██  ██  ██      ██      ██          ██    ██           ██    ██   ██ ██   ██ ██   ██ ██ ██  ██ ██ ██    ██ 
+██       ██████  ██   ██     ██   ██ ███████ ███████ ██          ██    ██           ██    ██   ██ ██   ██ ██████  ██ ██   ████  ██████  
+                                                                                                                                         
+                                                                                                                                        
+ ██  ██████  ██       █████  ███    ██ ██████   █████  ███    ██ ████████ ███████                                                         
+██  ██        ██     ██   ██ ████   ██ ██   ██ ██   ██ ████   ██    ██    ██                                                             
+██  ██        ██     ███████ ██ ██  ██ ██   ██ ███████ ██ ██  ██    ██    █████                                                          
+██  ██        ██     ██   ██ ██  ██ ██ ██   ██ ██   ██ ██  ██ ██    ██    ██                                                             
+ ██  ██████  ██      ██   ██ ██   ████ ██████  ██   ██ ██   ████    ██    ███████
+
+Donate: 0x0004230c13c3890F34Bb9C9683b91f539E809000                                                                             
+                                                                              
 EOF
 echo -e "${NC}"
 }
@@ -42,28 +49,34 @@ echo -e "${NC}"
 download_node() {
     echo -e "${BLUE}Начинается установка ноды...${NC}"
 
+    # Проверка наличия папки .titanedge
     if [ -d "$HOME/.titanedge" ]; then
-        echo -e "${RED}Папка .titanedge уже существует. Удалите ноду и установите заново.${NC}"
+        echo -e "${RED}Папка .titanedge уже существует. Удалите ноду и установите заново. Выход...${NC}"
         return 0
     fi
 
+    # Установка lsof для проверки портов
     sudo apt install lsof -y
 
+    # Проверка портов
     ports=(1234 55702 48710)
     for port in "${ports[@]}"; do
-        if lsof -i :"$port" | grep LISTEN; then
-            echo -e "${RED}Порт $port занят.${NC}"
+        if [[ $(lsof -i :"$port" | wc -l) -gt 0 ]]; then
+            echo -e "${RED}Ошибка: Порт $port занят. Программа не сможет выполниться.${NC}"
             exit 1
         fi
     done
 
-    echo -e "${GREEN}Все порты свободны!${NC}"
+    echo -e "${GREEN}Все порты свободны! Сейчас начнётся установка...${NC}\n"
 
     cd $HOME
 
+    # Обновление и установка зависимостей
+    echo -e "${BLUE}Обновляем и устанавливаем необходимые пакеты...${NC}"
     sudo apt update -y && sudo apt upgrade -y
-    sudo apt install nano git gnupg lsb-release apt-transport-https jq screen ca-certificates curl -y
+    sudo apt-get install nano git gnupg lsb-release apt-transport-https jq screen ca-certificates curl -y
 
+    # Установка Docker
     if ! command -v docker &> /dev/null; then
         echo -e "${BLUE}Устанавливаем Docker...${NC}"
         curl -fsSL https://get.docker.com -o get-docker.sh
@@ -71,21 +84,28 @@ download_node() {
         sudo usermod -aG docker $USER
         rm get-docker.sh
     else
-        echo -e "${YELLOW}Docker уже установлен.${NC}"
+        echo -e "${YELLOW}Docker уже установлен. Пропускаем.${NC}"
     fi
 
+    # Установка Docker Compose
     if ! command -v docker-compose &> /dev/null; then
         echo -e "${BLUE}Устанавливаем Docker Compose...${NC}"
         sudo curl -L "https://github.com/docker/compose/releases/download/$(curl -s https://api.github.com/repos/docker/compose/releases/latest | jq -r .tag_name)/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
         sudo chmod +x /usr/local/bin/docker-compose
     else
-        echo -e "${YELLOW}Docker Compose уже установлен.${NC}"
+        echo -e "${YELLOW}Docker Compose уже установлен. Пропускаем.${NC}"
     fi
 
-    echo -e "${GREEN}Запускаем ноду...${NC}"
+    echo -e "${GREEN}Необходимые зависимости были установлены. Запускаем ноду...${NC}"
 
-    docker ps -a --filter "ancestor=$DOCKER_IMAGE" --format "{{.ID}}" | xargs -r docker rm -f
+    # Логика из launch_node
+    # Остановка и удаление существующих контейнеров (если есть)
+    docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | wc -l) | while read container_id; do
+        docker stop "$container_id"
+        docker rm "$container_id"
+    done
 
+    # Запрос HASH
     while true; do
         echo -e "${YELLOW}Введите ваш HASH:${NC}"
         read -p "> " HASH
@@ -95,9 +115,11 @@ download_node() {
         echo -e "${RED}HASH не может быть пустым.${NC}"
     done
 
-    docker run --network=host -d -v ~/.titanedge:$HOME/.titanedge $DOCKER_IMAGE
+    # Запуск контейнера и привязка
+    docker run --network=host -d -v ~/.titanedge:$HOME/.titanedge nezha123/titan-edge
     sleep 10
-    docker run --rm -it -v ~/.titanedge:$HOME/.titanedge $DOCKER_IMAGE bind --hash=$HASH https://api-test1.container1.titannet.io/api/v2/device/binding
+
+    docker run --rm -it -v ~/.titanedge:$HOME/.titanedge nezha123/titan-edge bind --hash=$HASH https://api-test1.container1.titannet.io/api/v2/device/binding
 
     echo -e "${GREEN}Нода успешно установлена и запущена!${NC}"
 }
@@ -111,83 +133,129 @@ net.core.wmem_default=26214400
 "
     local SYSCTL_CONF="/etc/sysctl.conf"
 
-    echo -e "${BLUE}Создаём резервную копию sysctl.conf.bak...${NC}"
+    echo -e "${BLUE}Делаем резервную копию sysctl.conf.bak...${NC}"
     sudo cp "$SYSCTL_CONF" "$SYSCTL_CONF.bak"
 
-    echo -e "${BLUE}Добавляем новые параметры в sysctl.conf...${NC}"
+    echo -e "${BLUE}Обновляем sysctl.conf с новой конфигурацией...${NC}"
     echo "$CONFIG_VALUES" | sudo tee -a "$SYSCTL_CONF" > /dev/null
 
-    echo -e "${BLUE}Применяем изменения...${NC}"
+    echo -e "${BLUE}Применяем новые настройки...${NC}"
     sudo sysctl -p
+
+    echo -e "${GREEN}Настройки успешно обновлены.${NC}"
 
     if command -v setenforce &> /dev/null; then
         echo -e "${BLUE}Отключаем SELinux...${NC}"
         sudo setenforce 0
+    else
+        echo -e "${YELLOW}SELinux не установлен.${NC}"
     fi
 }
 
 many_node() {
-    docker ps -a --filter "ancestor=$DOCKER_IMAGE" --format "{{.ID}}" | xargs -r docker rm -f
+    # Остановка существующих контейнеров
+    docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | wc -l) | while read container_id; do
+        docker stop "$container_id"
+        docker rm "$container_id"
+    done
 
+    # Запрос HASH
     echo -e "${YELLOW}Введите ваш HASH:${NC}"
-    read -p "> " HASH
+    read -p "> " id
 
+    # Обновление настроек sysctl
     update_sysctl_config
 
     storage_gb=50
     start_port=1235
-    container_count=5
+    container_count=5  # Устанавливаем 5 нод
 
-    public_ip=$(curl -s https://api.ipify.org)
+    public_ips=$(curl -s https://api.ipify.org)
 
-    if [ -z "$public_ip" ]; then
-        echo -e "${RED}Не удалось получить IP.${NC}"
+    if [ -z "$public_ips" ]; then
+        echo -e "${RED}Не удалось получить IP-адрес.${NC}"
         exit 1
     fi
 
-    docker pull $DOCKER_IMAGE
+    # Пул образа
+    docker pull nezha123/titan-edge
 
     current_port=$start_port
-    for ((i=1; i<=container_count; i++)); do
-        storage_path="$HOME/titan_storage_${i}"
+    for ip in $public_ips; do
+        echo -e "${BLUE}Устанавливаем ноды на IP $ip...${NC}"
   
-        sudo mkdir -p "$storage_path"
-        sudo chmod -R 777 "$storage_path"
+        for ((i=1; i<=container_count; i++)); do
+            storage_path="$HOME/titan_storage_${ip}_${i}"
   
-        container_id=$(docker run -d --restart always -v "$storage_path:$HOME/.titanedge/storage" --name "titan_${i}" --net=host $DOCKER_IMAGE)
+            sudo mkdir -p "$storage_path"
+            sudo chmod -R 777 "$storage_path"
   
-        echo -e "${GREEN}Нода titan_${i} запущена с ID контейнера $container_id${NC}"
+            container_id=$(docker run -d --restart always -v "$storage_path:$HOME/.titanedge/storage" --name "titan_${ip}_${i}" --net=host nezha123/titan-edge)
   
-        sleep 30
+            echo -e "${GREEN}Нода titan_${ip}_${i} запущена с ID контейнера $container_id${NC}"
   
-        docker exec $container_id bash -c "\
-            sed -i 's/^[[:space:]]*#StorageGB = .*/StorageGB = $storage_gb/' $HOME/.titanedge/config.toml && \
-            sed -i 's/^[[:space:]]*#ListenAddress = \"0.0.0.0:1234\"/ListenAddress = \"0.0.0.0:$current_port\"/' $HOME/.titanedge/config.toml"
+            sleep 30
+  
+            docker exec $container_id bash -c "\
+                sed -i 's/^[[:space:]]*#StorageGB = .*/StorageGB = $storage_gb/' $HOME/.titanedge/config.toml && \
+                sed -i 's/^[[:space:]]*#ListenAddress = \"0.0.0.0:1234\"/ListenAddress = \"0.0.0.0:$current_port\"/' $HOME/.titanedge/config.toml && \
+                echo 'Хранилище titan_${ip}_${i} установлено на $storage_gb GB, порт установлен на $current_port'"
 
-        docker restart $container_id
+            docker restart $container_id
 
-        docker exec $container_id bash -c "\
-            titan-edge bind --hash=$HASH https://api-test1.container1.titannet.io/api/v2/device/binding"
+            docker exec $container_id bash -c "\
+                titan-edge bind --hash=$id https://api-test1.container1.titannet.io/api/v2/device/binding"
+            echo -e "${GREEN}Нода titan_${ip}_${i} успешно установлена.${NC}"
   
-        echo -e "${GREEN}Нода titan_${i} успешно установлена.${NC}"
-
-        current_port=$((current_port + 1))
+            current_port=$((current_port + 1))
+        done
     done
+    echo -e "${GREEN}Все 5 нод успешно установлены!${NC}"
 }
 
 docker_logs() {
-    echo -e "${BLUE}Вывод логов контейнеров...${NC}"
-    docker ps -a --filter "ancestor=$DOCKER_IMAGE" --format "{{.ID}}" | xargs -r docker logs
+    echo -e "${BLUE}Проверяем логи ноды...${NC}"
+    docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | wc -l) | while read container_id; do
+        docker logs "$container_id"
+    done
+    echo -e "${BLUE}Логи выведены. Возвращаемся в меню...${NC}"
 }
 
 restart_node() {
-    echo -e "${BLUE}Перезапуск контейнеров...${NC}"
-    docker ps -a --filter "ancestor=$DOCKER_IMAGE" --format "{{.ID}}" | xargs -r docker restart
+    echo -e "${BLUE}Перезапускаем ноду...${NC}"
+    docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | wc -l) | while read container_id; do
+        docker restart "$container_id"
+    done
+    echo -e "${GREEN}Нода успешно перезапущена!${NC}"
 }
 
 stop_node() {
-    echo -e "${BLUE}Остановка контейнеров...${NC}"
-    docker ps -a --filter "ancestor=$DOCKER_IMAGE" --format "{{.ID}}" | xargs -r docker stop
+    echo -e "${BLUE}Останавливаем ноду...${NC}"
+    docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | wc -l) | while read container_id; do
+        docker stop "$container_id"
+    done
+    echo -e "${GREEN}Нода остановлена!${NC}"
+}
+
+delete_node() {
+    echo -e "${YELLOW}Если уверены, что хотите удалить ноду, введите любую букву (CTRL+C чтобы выйти):${NC}"
+    read -p "> " checkjust
+
+    echo -e "${BLUE}Удаляем ноду...${NC}"
+    docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | wc -l) | while read container_id; do
+        docker stop "$container_id"
+        docker rm "$container_id"
+    done
+
+    sudo rm -rf $HOME/.titanedge
+    sudo rm -rf $HOME/titan_storage_*  # Удаляем дополнительные пути хранения
+
+    echo -e "${GREEN}Нода успешно удалена!${NC}"
+}
+
+exit_from_script() {
+    echo -e "${BLUE}Выход из скрипта...${NC}"
+    exit 0
 }
 
 main_menu() {
