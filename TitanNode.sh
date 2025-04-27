@@ -41,7 +41,7 @@ ________________________________________________________________________________
  ██  ██████  ██      ██   ██ ██   ████ ██████  ██   ██ ██   ████    ██    ███████
 
 Donate: 0x0004230c13c3890F34Bb9C9683b91f539E809000                                                                             
-                                                                              
+Test                                                                              
 EOF
 echo -e "${NC}"
 }
@@ -59,11 +59,27 @@ check_architecture() {
 
     if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
         echo -e "${YELLOW}Обнаружена ARM64-система. Настраиваем QEMU для эмуляции amd64...${NC}"
-        # Установка QEMU
+        # Установка qemu-user и qemu-user-static
         sudo apt update
-        sudo apt install -y qemu-user-static
-        # Регистрация QEMU в Docker
-        docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+        sudo apt install -y qemu-user qemu-user-static
+        # Проверка наличия qemu-x86_64
+        if ! command -v qemu-x86_64 &> /dev/null; then
+            echo -e "${RED}Ошибка: qemu-x86_64 не найден после установки. Эмуляция невозможна. Выход...${NC}"
+            exit 1
+        fi
+        echo -e "${GREEN}qemu-x86_64 установлен: $(qemu-x86_64 --version)${NC}"
+        # Проверка binfmt_misc
+        if [ ! -d "/proc/sys/fs/binfmt_misc" ]; then
+            echo -e "${BLUE}Включаем binfmt_misc...${NC}"
+            sudo modprobe binfmt_misc
+            sudo systemctl enable --now systemd-binfmt
+        fi
+        # Регистрация QEMU с указанием платформы
+        echo -e "${BLUE}Регистрируем QEMU...${NC}"
+        if ! docker run --rm --privileged --platform linux/arm64 multiarch/qemu-user-static --reset -p yes; then
+            echo -e "${RED}Ошибка: Не удалось зарегистрировать QEMU. Эмуляция amd64 невозможна. Выход...${NC}"
+            exit 1
+        fi
         # Перезапуск Docker
         sudo systemctl restart docker
         # Установка платформы для эмуляции
