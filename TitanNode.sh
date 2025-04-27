@@ -249,12 +249,7 @@ many_node() {
     fi
 
     # Пул образа
-    echo -e "${BLUE}Загружаем последнюю версию образа nezha123/titan-edge...${NC}"
     docker pull nezha123/titan-edge
-
-    # Проверка архитектуры образа
-    echo -e "${BLUE}Проверяем архитектуру образа...${NC}"
-    docker inspect nezha123/titan-edge | grep Architecture
 
     current_port=$start_port
     for ip in $public_ips; do
@@ -266,34 +261,40 @@ many_node() {
             sudo mkdir -p "$storage_path"
             sudo chmod -R 777 "$storage_path"
   
-            # Создаём config.toml с правильным портом до запуска контейнера
-            echo -e "${BLUE}Создаём config.toml для ноды titan_${ip}_${i}...${NC}"
-            mkdir -p "$storage_path"
-            cat > "$storage_path/config.toml" <<EOF
-StorageGB = $storage_gb
-ListenAddress = "0.0.0.0:$current_port"
-EOF
-
-            # Запуск контейнера
             container_id=$(docker run $DOCKER_PLATFORM_OPTION -d --restart always -v "$storage_path:$HOME/.titanedge/storage" --name "titan_${ip}_${i}" --net=host nezha123/titan-edge)
   
             echo -e "${GREEN}Нода titan_${ip}_${i} запущена с ID контейнера $container_id${NC}"
   
-            # Ожидаем готовности контейнера
-            wait_for_container "$container_id"
-
-            # Даём время на генерацию ключа
-            echo -e "${BLUE}Ожидаем генерацию ключа для ноды titan_${ip}_${i}...${NC}"
-            sleep 60
+            sleep 60  # Даём время на запуск и генерацию ключа
   
-            # Привязка с использованием HASH
-            echo -e "${BLUE}Привязываем ноду titan_${ip}_${i} с использованием HASH...${NC}"
-            if ! docker exec $container_id titan-edge bind --hash="$id" https://api-test1.container1.titannet.io/api/v2/device/binding; then
-                echo -e "${RED}Ошибка при привязке ноды titan_${ip}_${i}. Проверяйте логи контейнера.${NC}"
+            docker exec $container_id bash -c "\
+                sed -i 's/^[[:space:]]*#StorageGB = .*/StorageGB = $storage_gb/' $HOME/.titanedge/config.toml && \
+                sed -i 's/^[[:space:]]*#ListenAddress = \"0.0.0.0:1234\"/ListenAddress = \"0.0.0.0:$current_port\"/' $HOME/.titanedge/config.toml && \
+                echo 'Хранилище titan_${ip}_${i} установлено на $storage_gb GB, порт установлен на $current_port'"
+
+            docker restart $container_id
+
+            # Ожидание готовности контейнера после перезапуска
+            timeout=60
+            elapsed=0
+            interval=5
+            echo -e "${BLUE}Ожидаем, пока контейнер $container_id перейдёт в состояние running...${NC}"
+            while [ $elapsed -lt $timeout ]; do
+                if docker inspect --format='{{.State.Status}}' "$container_id" | grep -q "running"; then
+                    echo -e "${GREEN}Контейнер $container_id готов!${NC}"
+                    break
+                fi
+                sleep $interval
+                elapsed=$((elapsed + interval))
+            done
+            if [ $elapsed -ge $timeout ]; then
+                echo -e "${RED}Ошибка: Контейнер $container_id не перешёл в состояние running за $timeout секунд. Проверяйте логи контейнера.${NC}"
                 docker logs "$container_id"
                 exit 1
             fi
 
+            docker exec $container_id bash -c "\
+                titan-edge bind --hash=$id https://api-test1.container1.titannet.io/api/v2/device/binding"
             echo -e "${GREEN}Нода titan_${ip}_${i} успешно установлена.${NC}"
   
             current_port=$((current_port + 1))
