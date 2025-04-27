@@ -41,57 +41,11 @@ ________________________________________________________________________________
  ██  ██████  ██      ██   ██ ██   ████ ██████  ██   ██ ██   ████    ██    ███████
 
 Donate: 0x0004230c13c3890F34Bb9C9683b91f539E809000                                                                             
-Test                                                                              
+                                                                              
 EOF
 echo -e "${NC}"
 }
 
-#!/bin/bash
-
-# Переменная для платформы (будет определена позже)
-PLATFORM=""
-
-# Функция для проверки архитектуры и настройки QEMU
-check_architecture() {
-    echo -e "${BLUE}Проверяем архитектуру системы...${NC}"
-    ARCH=$(uname -m)
-    echo -e "${CYAN}Архитектура хоста: $ARCH${NC}"
-
-    if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
-        echo -e "${YELLOW}Обнаружена ARM64-система. Настраиваем QEMU для эмуляции amd64...${NC}"
-        # Установка qemu-user и qemu-user-static
-        sudo apt update
-        sudo apt install -y qemu-user qemu-user-static
-        # Проверка наличия qemu-x86_64
-        if ! command -v qemu-x86_64 &> /dev/null; then
-            echo -e "${RED}Ошибка: qemu-x86_64 не найден после установки. Эмуляция невозможна. Выход...${NC}"
-            exit 1
-        fi
-        echo -e "${GREEN}qemu-x86_64 установлен: $(qemu-x86_64 --version)${NC}"
-        # Проверка binfmt_misc
-        if [ ! -d "/proc/sys/fs/binfmt_misc" ]; then
-            echo -e "${BLUE}Включаем binfmt_misc...${NC}"
-            sudo modprobe binfmt_misc
-            sudo systemctl enable --now systemd-binfmt
-        fi
-        # Регистрация QEMU с указанием платформы
-        echo -e "${BLUE}Регистрируем QEMU...${NC}"
-        if ! docker run --rm --privileged --platform linux/arm64 multiarch/qemu-user-static --reset -p yes; then
-            echo -e "${RED}Ошибка: Не удалось зарегистрировать QEMU. Эмуляция amd64 невозможна. Выход...${NC}"
-            exit 1
-        fi
-        # Перезапуск Docker
-        sudo systemctl restart docker
-        # Установка платформы для эмуляции
-        PLATFORM="--platform linux/amd64"
-        echo -e "${GREEN}QEMU настроен. Будет использоваться эмуляция amd64.${NC}"
-    else
-        echo -e "${GREEN}Система не ARM64. Эмуляция не требуется.${NC}"
-        PLATFORM=""
-    fi
-}
-
-# Функция для установки одной ноды
 download_node() {
     echo -e "${BLUE}Начинается установка ноды...${NC}"
 
@@ -142,24 +96,14 @@ download_node() {
         echo -e "${YELLOW}Docker Compose уже установлен. Пропускаем.${NC}"
     fi
 
-    # Проверка архитектуры и настройка QEMU
-    check_architecture
-
     echo -e "${GREEN}Необходимые зависимости были установлены. Запускаем ноду...${NC}"
 
+    # Логика из launch_node
     # Остановка и удаление существующих контейнеров (если есть)
     docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | wc -l) | while read container_id; do
         docker stop "$container_id"
         docker rm "$container_id"
     done
-
-    # Загрузка последней версии образа
-    echo -e "${BLUE}Загружаем последнюю версию образа nezha123/titan-edge...${NC}"
-    docker pull nezha123/titan-edge
-
-    # Проверка архитектуры образа
-    echo -e "${BLUE}Проверяем архитектуру образа...${NC}"
-    docker inspect nezha123/titan-edge | grep Architecture
 
     # Запрос HASH
     while true; do
@@ -171,38 +115,15 @@ download_node() {
         echo -e "${RED}HASH не может быть пустым.${NC}"
     done
 
-    # Запуск временного контейнера для генерации ключа
-    echo -e "${BLUE}Запускаем контейнер для генерации приватного ключа...${NC}"
-    docker run $PLATFORM --network=host -d -v ~/.titanedge:$HOME/.titanedge --name titan_temp nezha123/titan-edge
-    sleep 30  # Даём время на генерацию ключа
+    # Запуск контейнера и привязка
+    docker run --network=host -d -v ~/.titanedge:$HOME/.titanedge nezha123/titan-edge
+    sleep 10
 
-    # Проверка наличия ключа
-    if [ -f "$HOME/.titanedge/identity/identity.key" ]; then
-        echo -e "${GREEN}Приватный ключ успешно сгенерирован!${NC}"
-    else
-        echo -e "${RED}Ошибка: Приватный ключ не был сгенерирован. Проверяйте логи контейнера titan_temp.${NC}"
-        docker logs titan_temp
-        docker stop titan_temp
-        docker rm titan_temp
-        exit 1
-    fi
-
-    # Привязка с использованием HASH
-    echo -e "${BLUE}Привязываем ноду с использованием HASH...${NC}"
-    docker exec titan_temp titan-edge bind --hash="$HASH" https://api-test1.container1.titannet.io/api/v2/device/binding
-
-    # Остановка временного контейнера
-    docker stop titan_temp
-    docker rm titan_temp
-
-    # Запуск постоянного контейнера
-    echo -e "${BLUE}Запускаем постоянный контейнер...${NC}"
-    docker run $PLATFORM --network=host -d --restart always -v ~/.titanedge:$HOME/.titanedge nezha123/titan-edge
+    docker run --rm -it -v ~/.titanedge:$HOME/.titanedge nezha123/titan-edge bind --hash=$HASH https://api-test1.container1.titannet.io/api/v2/device/binding
 
     echo -e "${GREEN}Нода успешно установлена и запущена!${NC}"
 }
 
-# Функция для обновления sysctl
 update_sysctl_config() {
     local CONFIG_VALUES="
 net.core.rmem_max=26214400
@@ -231,7 +152,6 @@ net.core.wmem_default=26214400
     fi
 }
 
-# Функция для установки 5 нод
 many_node() {
     # Остановка существующих контейнеров
     docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | wc -l) | while read container_id; do
@@ -257,13 +177,8 @@ many_node() {
         exit 1
     fi
 
-    # Пул последней версии образа
-    echo -e "${BLUE}Загружаем последнюю версию образа nezha123/titan-edge...${NC}"
+    # Пул образа
     docker pull nezha123/titan-edge
-
-    # Проверка архитектуры образа
-    echo -e "${BLUE}Проверяем архитектуру образа...${NC}"
-    docker inspect nezha123/titan-edge | grep Architecture
 
     current_port=$start_port
     for ip in $public_ips; do
@@ -275,40 +190,22 @@ many_node() {
             sudo mkdir -p "$storage_path"
             sudo chmod -R 777 "$storage_path"
   
-            # Запуск временного контейнера для генерации ключа
-            echo -e "${BLUE}Запускаем временный контейнер для генерации ключа для ноды titan_${ip}_${i}...${NC}"
-            docker run $PLATFORM -d -v "$storage_path:$HOME/.titanedge/storage" --name "titan_temp_${ip}_${i}" --net=host nezha123/titan-edge
-            sleep 30  # Даём время на генерацию ключа
-
-            # Проверка наличия ключа
-            if [ -f "$storage_path/identity/identity.key" ]; then
-                echo -e "${GREEN}Приватный ключ для ноды titan_${ip}_${i} успешно сгенерирован!${NC}"
-            else
-                echo -e "${RED}Ошибка: Приватный ключ для ноды titan_${ip}_${i} не был сгенерирован. Проверяйте логи контейнера titan_temp_${ip}_${i}.${NC}"
-                docker logs "titan_temp_${ip}_${i}"
-                docker stop "titan_temp_${ip}_${i}"
-                docker rm "titan_temp_${ip}_${i}"
-                exit 1
-            fi
-
-            # Настройка config.toml
-            docker exec "titan_temp_${ip}_${i}" bash -c "\
+            container_id=$(docker run -d --restart always -v "$storage_path:$HOME/.titanedge/storage" --name "titan_${ip}_${i}" --net=host nezha123/titan-edge)
+  
+            echo -e "${GREEN}Нода titan_${ip}_${i} запущена с ID контейнера $container_id${NC}"
+  
+            sleep 30
+  
+            docker exec $container_id bash -c "\
                 sed -i 's/^[[:space:]]*#StorageGB = .*/StorageGB = $storage_gb/' $HOME/.titanedge/config.toml && \
                 sed -i 's/^[[:space:]]*#ListenAddress = \"0.0.0.0:1234\"/ListenAddress = \"0.0.0.0:$current_port\"/' $HOME/.titanedge/config.toml && \
                 echo 'Хранилище titan_${ip}_${i} установлено на $storage_gb GB, порт установлен на $current_port'"
 
-            # Привязка с использованием HASH
-            echo -e "${BLUE}Привязываем ноду titan_${ip}_${i} с использованием HASH...${NC}"
-            docker exec "titan_temp_${ip}_${i}" titan-edge bind --hash="$id" https://api-test1.container1.titannet.io/api/v2/device/binding
+            docker restart $container_id
 
-            # Остановка временного контейнера
-            docker stop "titan_temp_${ip}_${i}"
-            docker rm "titan_temp_${ip}_${i}"
-
-            # Запуск постоянного контейнера
-            container_id=$(docker run $PLATFORM -d --restart always -v "$storage_path:$HOME/.titanedge/storage" --name "titan_${ip}_${i}" --net=host nezha123/titan-edge)
-  
-            echo -e "${GREEN}Нода titan_${ip}_${i} запущена с ID контейнера $container_id${NC}"
+            docker exec $container_id bash -c "\
+                titan-edge bind --hash=$id https://api-test1.container1.titannet.io/api/v2/device/binding"
+            echo -e "${GREEN}Нода titan_${ip}_${i} успешно установлена.${NC}"
   
             current_port=$((current_port + 1))
         done
@@ -316,17 +213,14 @@ many_node() {
     echo -e "${GREEN}Все 5 нод успешно установлены!${NC}"
 }
 
-# Функция для проверки логов
 docker_logs() {
     echo -e "${BLUE}Проверяем логи ноды...${NC}"
     docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | wc -l) | while read container_id; do
-        echo -e "${BLUE}Логи контейнера $container_id:${NC}"
         docker logs "$container_id"
     done
     echo -e "${BLUE}Логи выведены. Возвращаемся в меню...${NC}"
 }
 
-# Функция для перезапуска ноды
 restart_node() {
     echo -e "${BLUE}Перезапускаем ноду...${NC}"
     docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | wc -l) | while read container_id; do
@@ -335,7 +229,6 @@ restart_node() {
     echo -e "${GREEN}Нода успешно перезапущена!${NC}"
 }
 
-# Функция для остановки ноды
 stop_node() {
     echo -e "${BLUE}Останавливаем ноду...${NC}"
     docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | wc -l) | while read container_id; do
@@ -344,7 +237,6 @@ stop_node() {
     echo -e "${GREEN}Нода остановлена!${NC}"
 }
 
-# Функция для удаления ноды
 delete_node() {
     echo -e "${YELLOW}Если уверены, что хотите удалить ноду, введите любую букву (CTRL+C чтобы выйти):${NC}"
     read -p "> " checkjust
@@ -361,18 +253,11 @@ delete_node() {
     echo -e "${GREEN}Нода успешно удалена!${NC}"
 }
 
-# Функция для выхода из скрипта
 exit_from_script() {
     echo -e "${BLUE}Выход из скрипта...${NC}"
     exit 0
 }
 
-# Функция заглушки для channel_logo
-channel_logo() {
-    echo -e "${CYAN}Запуск скрипта для управления нодой Titan...${NC}"
-}
-
-# Главное меню
 main_menu() {
     while true; do
         channel_logo
@@ -401,5 +286,4 @@ main_menu() {
     done
 }
 
-# Запуск главного меню
 main_menu
