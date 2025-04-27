@@ -190,7 +190,7 @@ many_node() {
             sudo mkdir -p "$storage_path"
             sudo chmod -R 777 "$storage_path"
   
-            container_id=$(docker run -d --restart always -v "$storage_path:$HOME/.titanedge/storage" --name "titan_${ip}_${i}" --net=host nezha123/titan-edge)
+            container_id=$(docker run --platform linux/amd64 -d --restart always -v "$storage_path:$HOME/.titanedge/storage" --name "titan_${ip}_${i}" --net=host nezha123/titan-edge)
   
             echo -e "${GREEN}Нода titan_${ip}_${i} запущена с ID контейнера $container_id${NC}"
   
