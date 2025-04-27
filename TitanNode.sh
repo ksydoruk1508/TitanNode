@@ -15,7 +15,6 @@ if ! command -v curl &> /dev/null; then
 fi
 
 # Логотип (можно заменить на твой)
-channel_logo() {
 echo -e "${GREEN}"
 cat << "EOF"
 ████████ ██ ████████  █████  ███    ██     ███    ██  ██████  ██████  ███████ 
@@ -44,7 +43,6 @@ Donate: 0x0004230c13c3890F34Bb9C9683b91f539E809000
                                                                               
 EOF
 echo -e "${NC}"
-}
 
 # Функция для определения архитектуры и настройки QEMU
 setup_architecture() {
