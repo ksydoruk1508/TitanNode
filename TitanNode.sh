@@ -156,60 +156,66 @@ net.core.wmem_default=26214400
 }
 
 many_node() {
-    docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | while read container_id; do
+    # Остановка существующих контейнеров
+    docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | shuf -n $(docker ps -a --filter "ancestor=nezha123/titan-edge" --format "{{.ID}}" | wc -l) | while read container_id; do
         docker stop "$container_id"
         docker rm "$container_id"
     done
 
+    # Запрос HASH
     echo -e "${YELLOW}Введите ваш HASH:${NC}"
     read -p "> " id
 
+    # Обновление настроек sysctl
     update_sysctl_config
 
     storage_gb=50
     start_port=1235
-    container_count=5
+    container_count=5  # Устанавливаем 5 нод
 
-    public_ip=$(curl -s https://api.ipify.org)
+    public_ips=$(curl -s https://api.ipify.org)
 
-    if [ -z "$public_ip" ]; then
+    if [ -z "$public_ips" ]; then
         echo -e "${RED}Не удалось получить IP-адрес.${NC}"
         exit 1
     fi
 
+    # Пул образа
     docker pull nezha123/titan-edge
 
     current_port=$start_port
-    echo -e "${BLUE}Устанавливаем ноды на IP $public_ip...${NC}"
+    for ip in $public_ips; do
+        echo -e "${BLUE}Устанавливаем ноды на IP $ip...${NC}"
+  
+        for ((i=1; i<=container_count; i++)); do
+            storage_path="$HOME/titan_storage_${ip}_${i}"
+  
+            sudo mkdir -p "$storage_path"
+            sudo chmod -R 777 "$storage_path"
+  
+            container_id=$(docker run -d --restart always -v "$storage_path:$HOME/.titanedge/storage" --name "titan_${ip}_${i}" --net=host nezha123/titan-edge)
+  
+            echo -e "${GREEN}Нода titan_${ip}_${i} запущена с ID контейнера $container_id${NC}"
+  
+            sleep 30
+  
+            docker exec $container_id bash -c "\
+                sed -i 's/^[[:space:]]*#StorageGB = .*/StorageGB = $storage_gb/' $HOME/.titanedge/config.toml && \
+                sed -i 's/^[[:space:]]*#ListenAddress = \"0.0.0.0:1234\"/ListenAddress = \"0.0.0.0:$current_port\"/' $HOME/.titanedge/config.toml && \
+                echo 'Хранилище titan_${ip}_${i} установлено на $storage_gb GB, порт установлен на $current_port'"
 
-    for ((i=1; i<=container_count; i++)); do
-        storage_path="$HOME/titan_storage_${public_ip}_${i}"
+            docker restart $container_id
 
-        sudo mkdir -p "$storage_path"
-        sudo chmod -R 777 "$storage_path"
-
-        container_id=$(docker run $DOCKER_PLATFORM_OPTION -d --restart always -v "$storage_path:$HOME/.titanedge/storage" --name "titan_${public_ip}_${i}" --net=host nezha123/titan-edge)
-
-        echo -e "${GREEN}Нода titan_${public_ip}_${i} запущена с ID контейнера $container_id${NC}"
-
-        sleep 30
-
-        docker exec $DOCKER_PLATFORM_OPTION $container_id bash -c "\
-            sed -i 's/^[[:space:]]*#StorageGB = .*/StorageGB = $storage_gb/' $HOME/.titanedge/config.toml && \
-            sed -i 's/^[[:space:]]*#ListenAddress = \"0.0.0.0:1234\"/ListenAddress = \"0.0.0.0:$current_port\"/' $HOME/.titanedge/config.toml"
-
-        docker restart $container_id
-
-        docker exec $DOCKER_PLATFORM_OPTION $container_id bash -c "\
-            titan-edge bind --hash=$id https://api-test1.container1.titannet.io/api/v2/device/binding"
-
-        echo -e "${GREEN}Нода titan_${public_ip}_${i} успешно установлена.${NC}"
-
-        current_port=$((current_port + 1))
+            docker exec $container_id bash -c "\
+                titan-edge bind --hash=$id https://api-test1.container1.titannet.io/api/v2/device/binding"
+            echo -e "${GREEN}Нода titan_${ip}_${i} успешно установлена.${NC}"
+  
+            current_port=$((current_port + 1))
+        done
     done
-
     echo -e "${GREEN}Все 5 нод успешно установлены!${NC}"
 }
+
 
 docker_logs() {
     echo -e "${BLUE}Проверяем логи ноды...${NC}"
